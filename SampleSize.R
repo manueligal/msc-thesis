@@ -33,6 +33,10 @@ k_E <- 2  #Number of domains
 k_U <- 2  #Number of categories of U
 k_W <- 2  #Number of categories of W
 
+doX <- 1 #Calculate the interventional distribution do(X=doX)
+
+set.seed(123)
+
 #Generation of the probability matrices
 PUE <- mat_gen(k_U,k_E)           #P(U|E)
 PWU <- mat_gen(k_W,k_U)           #P(W|U) 
@@ -40,15 +44,17 @@ QU <- vec_gen(k_U,1)              #Q(U)
 QW <- PWU%*%QU                    #Q(W)
 
 #Exact values
-PX1U <- vec_gen(k_U,1)                        #P(X=1|U)
-PX1E <- as.vector(PX1U%*%PUE)                 #P(X=1|E)
-PUEX1 <- t(t(PX1U*PUE)/PX1E)                  #P(U|E,X=1)
-PWEx_t <- PWU%*%PUEX1                         #P(W|E,X=1)
+PX1U <- runif(2)                              #P(X=1|U)
+PXU <- array(c(1-PX1U,PX1U),c(1,2,2))         #P(X|U)
+PxU <- PXU[,,doX+1]                           #P(X=doX|U)
+PXE <- as.vector(PxU%*%PUE)                   #P(X=doX|E)
+PUEX <- t(t(PxU*PUE)/PXE)                     #P(U|E,X=doX)
+PWEx_t <- PWU%*%PUEX                          #P(W|E,X=doX)
 PyUWX <- array(runif(2*k_U*k_W),c(k_W,k_U,2)) #P(Y=1|U,W,X)
-PyUWx <- PyUWX[,,2]                           #P(Y=1|U,W,X=1)
-PyUx <- diag(PyUWx%*%PWU)                     #P(Y=1|U,X=1)
-PyEx_t <- PyUx%*%PUEX1                        #P(Y=1|E,X=1)
-effect <- PyEx_t%*%solve(PWEx_t)%*%QW         #Q(Y=1|do(X=1))
+PyUWx <- PyUWX[,,doX+1]                       #P(Y=1|U,W,X=doX)
+PyUx <- diag(PyUWx%*%PWU)                     #P(Y=1|U,X=doX)
+PyEx_t <- PyUx%*%PUEX                         #P(Y=1|E,X=doX)
+effect <- PyEx_t%*%solve(PWEx_t)%*%QW         #Q(Y=1|do(X=doX))
 
 for(l in 1:length(sample_sizes)){
   n <- sample_sizes[l]
@@ -61,8 +67,6 @@ for(l in 1:length(sample_sizes)){
   PyEx <- rep(0,k_E)
   PWEx <- matrix(0,k_W,k_E)
   
-  set.seed(123)
-  
   for(j in 1:N){
     #Generation of a sample of W in the target domain
     Wnew <- sample(1:k_W,n,replace=TRUE,prob=QW)
@@ -74,9 +78,9 @@ for(l in 1:length(sample_sizes)){
       X[,i] <- (runif(n)<PX1E[U[,i]])*1
       Y[,i] <- (runif(n)<PyUWX[cbind(U[,i],W[,i],X[,i]+1)])*1
       
-      #Estimation of P(Y=1|E,X=1) and P(W|E,X=1)
-      PyEx[i] <- mean(Y[X[,i]==1,i])
-      PWEx[,i] <- as.vector(table(factor(W[X[,i]==1,i], levels=1:k_W)))/sum(X[,i]==1)
+      #Estimation of P(Y=1|E,X=doX) and P(W|E,X=doX)
+      PyEx[i] <- mean(Y[X[,i]==doX,i])
+      PWEx[,i] <- as.vector(table(factor(W[X[,i]==doX,i], levels=1:k_W)))/sum(X[,i]==doX)
     }
     #Estimation of the causal effect
     estim_effect <- PyEx%*%solve(PWEx)%*%QW_s
