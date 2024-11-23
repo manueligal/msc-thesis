@@ -1,110 +1,87 @@
-#Estimation of the causal effect depending on the condition number
+#Estimation of the causal effect depending on empirical condition number
 library(ggplot2)
+source('utils.R')
 
-M <- 20      #Number of different random matrices generated
+n <- 5000   #Sample size
+M <- 5      #Number of sets of matrices generated
+N <- 100    #Number of samples generated for each set of matrices
 
-#Mean and confidence interval for the causal effect
-means <- rep(0,M)
-confidence <- matrix(0,2,M)
-kappas <- rep(0,M)
+#Parameters
+k_E <- 2  #Number of domains
+k_U <- 2  #Number of categories of U
+k_W <- 2  #Number of categories of W
+
+doX <- 1 #Calculate the interventional distribution do(X=doX)
+
+data <- data.frame(matrix(NA,M*N,3))
+colnames(data) <- c('kappa','do','set')
+
+set.seed(4)
 
 for(m in 1:M){
-  print(m)
-  set.seed(100+m)
-  p <- runif(2)
-  PUE <- cbind(c(p[1],1-p[1]),c(p[2],1-p[2]))/10           #P(U|E)
-  PWU <- cbind(c(8,2),c(1,9))/10                           #P(W|U) 
-  QW <- c(0.4,0.6)                                         #Q(W)
+  #Generation of the probability matrices
+  PUE <- mat_gen(k_U,k_E)           #P(U|E)
+  PWU <- mat_gen(k_W,k_U)           #P(W|U) 
+  QU <- vec_gen(k_U,1)              #Q(U)
+  QW <- PWU%*%QU                    #Q(W)
   
   #Exact values
-  PX1U <-  c(6,8)/10                       #P(X=1|U)
-  PX1E <- as.vector(PX1U%*%PUE)            #P(X=1|E)
-  PUEX1 <- t(t(PX1U*PUE)/PX1E)             #P(U|E,X=1)
-  PWEx_t <- PWU%*%PUEX1                    #P(W|E,X=1)
-  PyWUx <- rbind(c(0.66,0.68),c(0.7,0.72)) #P(Y=1|W,U,X=1)
-  PyUx <- diag(PyWUx%*%PWU)                #P(Y=1|U,X=1)
-  PyEx_t <- PyUx%*%PUEX1                   #P(Y=1|E,X=1)
-  effect <- PyEx_t%*%solve(PWEx_t)%*%QW    #Q(Y=1|do(X=1))
+  PX1U <- runif(2)                              #P(X=1|U)
+  PXU <- array(c(1-PX1U,PX1U),c(1,2,2))         #P(X|U)
+  PxU <- PXU[,,doX+1]                           #P(X=doX|U)
+  PXE <- as.vector(PxU%*%PUE)                   #P(X=doX|E)
+  PUEX <- t(t(PxU*PUE)/PXE)                     #P(U|E,X=doX)
+  PWEx_t <- PWU%*%PUEX                          #P(W|E,X=doX)
+  PyUWX <- array(runif(2*k_U*k_W),c(k_W,k_U,2)) #P(Y=1|U,W,X)
+  PyUWx <- PyUWX[,,doX+1]                       #P(Y=1|U,W,X=doX)
+  PyUx <- diag(PyUWx%*%PWU)                     #P(Y=1|U,X=doX)
+  PyEx_t <- PyUx%*%PUEX                         #P(Y=1|E,X=doX)
+  effect <- PyEx_t%*%pseudosolve(PWEx_t)%*%QW   #Q(Y=1|do(X=doX))
   
-  #Function to obtain a sample of W from a sample of U
-  substitution <- function(i){
-    sample(1:2,1,prob=PWU[,i])
-  }
-  
-  n <- 1e3
-  N <- 100    #Number of samples generated for each matrix
-  
-  #Condition number of the generated matrix P(W|E,X=1)
-  kappas[m] <- kappa(PWEx_t)
-  
-  U <- matrix(0,n,2)
-  W <- matrix(0,n,2)
-  X <- matrix(0,n,2)
-  Y <- matrix(0,n,2)
+  U <- matrix(0,n,k_E)
+  W <- matrix(0,n,k_E)
+  X <- matrix(0,n,k_E)
+  Y <- matrix(0,n,k_E)
   do <- rep(0,N)
+  kappas <- rep(0,N)
   
-  PyEx <- rep(0,2)
-  PWEx <- matrix(0,2,2)
+  PyEx <- rep(0,k_E)
+  PWEx <- matrix(0,k_W,k_E)
   
-  #Generation of a sample of W in the target domain
-  set.seed(1234+n)
-  Wnew <- sample(1:2,n,replace=TRUE,prob=QW)
-  QW_s <- as.vector(table(factor(Wnew, levels=1:2)))/n
+  data$set[(N*(m-1)+1):(N*m)] <- kappa(PWEx_t)
   
   for(j in 1:N){
-    set.seed(j)
-    for(i in 1:2){
-      U[,i] <- sample(1:2,n,replace=TRUE,prob=PUE[,i])
+    #Generation of a sample of W in the target domain
+    Wnew <- sample(1:k_W,n,replace=TRUE,prob=QW)
+    QW_s <- as.vector(table(factor(Wnew, levels=1:k_W)))/n
+    
+    for(i in 1:k_E){
+      U[,i] <- sample(1:k_U,n,replace=TRUE,prob=PUE[,i])
       W[,i] <- sapply(U[,i],substitution)
-      X[,i] <- (runif(n)<(0.4+U[,i]/5))*1
-      Y[,i] <- (runif(n)<(0.1+X[,i]*0.5+U[,i]/25+W[,i]/50))*1
+      X[,i] <- (runif(n)<PXE[U[,i]])*1
+      Y[,i] <- (runif(n)<PyUWX[cbind(U[,i],W[,i],X[,i]+1)])*1
       
-      #Estimation of P(Y=1|E,X=1) and P(W|E,X=1)
-      PyEx[i] <- mean(Y[X[,i]==1,i])
-      PWEx[,i] <- as.vector(table(factor(W[X[,i]==1,i], levels=1:2)))/sum(X[,i]==1)
+      #Estimation of P(Y=1|E,X=doX) and P(W|E,X=doX)
+      PyEx[i] <- mean(Y[X[,i]==doX,i])
+      PWEx[,i] <- as.vector(table(factor(W[X[,i]==doX,i], levels=1:k_W)))/sum(X[,i]==doX)
     }
+    
     #Estimation of the causal effect
-    do[j] <- PyEx%*%solve(PWEx)%*%QW_s
+    estim_effect <- PyEx%*%pseudosolve(PWEx)%*%QW_s
+    
+    #Difference between the estimated and the real values
+    data$do[N*(m-1)+j] <- estim_effect-effect
+    
+    #Condition number of the estimation of P(W|E,X=doX)
+    data$kappa[N*(m-1)+j] <- kappa(PWEx)
   }
-  means[m] <- mean(do)
-  confidence[1,m] <- quantile(do,0.025)
-  confidence[2,m] <- quantile(do,0.975)
 }
 
-#Representation of the estimation of the causal effect depending on the condition number
-data <- data.frame(kappas=kappas,means=means,conf1=confidence[1,],conf2=confidence[2,])
-
-ggplot(data=data,aes(x=kappas)) +
-  geom_point(aes(y=means)) +
-  geom_errorbar(aes(x=kappas,ymin=conf1,ymax=conf2),width=0.5) +
-  geom_line(aes(y=effect),color='red',linetype='dashed') +
-  theme_bw() +
-  labs(x='Condition number of P(W|E,X=1)', y='Q(y|do(x))')
-
-
-#Relation between condition numbers of P(W|U) and P(W|E,X=1)
-K <- 100
-kappas1 <- kappas2 <- rep(0,K)
-
-for(k in 1:K){
-  set.seed(10+k)
-  p <- runif(2)
-  PUE <- cbind(c(5,5),c(7,3))/10                           #P(U|E)
-  PWU <- cbind(c(p[1],1-p[1]),c(p[2],1-p[2]))/10           #P(W|U) 
-  QW <- c(0.4,0.6)                                         #Q(W)
-  
-  PX1U <-  c(6,8)/10                       #P(X=1|U)
-  PX1E <- as.vector(PX1U%*%PUE)            #P(X=1|E)
-  PUEX1 <- t(t(PX1U*PUE)/PX1E)             #P(U|E,X=1)
-  PWEx_t <- PWU%*%PUEX1                    #P(W|E,X=1)
-  
-  kappas1[k] <- kappa(PWU)
-  kappas2[k] <- kappa(PWEx_t)
-}
-
-data_kappa <- data.frame(kappas1, kappas2)
-
-ggplot(data=data_kappa, aes(x=kappas1, y=kappas2)) +
+ggplot(data=data,aes(x=log(kappa),y=do,color=log(set))) +
   geom_point() +
+  labs(x=expression('log('~kappa~'('~widehat(P)~'(W|E,x)))'), y='Estimation error',
+       color=expression('log('~kappa~'('~'P(W|E,x)))  ')) +
   theme_bw() +
-  labs(x='Condition number of P(W|U)', y='Condition number of P(W|E,X=1)')
+  theme(legend.direction='vertical',legend.position='right',
+        legend.title=element_text(margin=margin(0,0,0,-30,'pt')),
+        legend.box.margin=margin(0,0,0,25))
