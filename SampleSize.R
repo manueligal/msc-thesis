@@ -1,25 +1,6 @@
 #Estimation of the causal effect depending on the sample size
 library(ggplot2)
-
-#Function to generate k numbers that add up to 1 (2 methods)
-vec_gen <- function(k,method){
-  if(method==1){
-    diff(c(0,sort(runif(k-1)),1))
-  }else{
-    x <- runif(k)
-    x/sum(x)
-  }
-}
-
-#Function to create a matrix of size kxm with columns that add up to 1
-mat_gen <- function(k,m){
-  replicate(m,vec_gen(k,1))
-}
-
-#Function to obtain a sample of W from a sample of U
-substitution <- function(i){
-  sample(1:k_W,1,prob=PWU[,i])
-}
+source('utils.R')
 
 sample_sizes <- c(200,1000,seq(2e3,1e4,2e3))
 N <- 100    #Number of samples generated for each sample size
@@ -54,7 +35,7 @@ PyUWX <- array(runif(2*k_U*k_W),c(k_W,k_U,2)) #P(Y=1|U,W,X)
 PyUWx <- PyUWX[,,doX+1]                       #P(Y=1|U,W,X=doX)
 PyUx <- diag(PyUWx%*%PWU)                     #P(Y=1|U,X=doX)
 PyEx_t <- PyUx%*%PUEX                         #P(Y=1|E,X=doX)
-effect <- PyEx_t%*%solve(PWEx_t)%*%QW         #Q(Y=1|do(X=doX))
+effect <- PyEx_t%*%pseudosolve(PWEx_t)%*%QW         #Q(Y=1|do(X=doX))
 
 for(l in 1:length(sample_sizes)){
   n <- sample_sizes[l]
@@ -75,7 +56,7 @@ for(l in 1:length(sample_sizes)){
     for(i in 1:k_E){
       U[,i] <- sample(1:k_U,n,replace=TRUE,prob=PUE[,i])
       W[,i] <- sapply(U[,i],substitution)
-      X[,i] <- (runif(n)<PX1E[U[,i]])*1
+      X[,i] <- (runif(n)<PXE[U[,i]])*1
       Y[,i] <- (runif(n)<PyUWX[cbind(U[,i],W[,i],X[,i]+1)])*1
       
       #Estimation of P(Y=1|E,X=doX) and P(W|E,X=doX)
@@ -83,7 +64,7 @@ for(l in 1:length(sample_sizes)){
       PWEx[,i] <- as.vector(table(factor(W[X[,i]==doX,i], levels=1:k_W)))/sum(X[,i]==doX)
     }
     #Estimation of the causal effect
-    estim_effect <- PyEx%*%solve(PWEx)%*%QW_s
+    estim_effect <- PyEx%*%pseudosolve(PWEx)%*%QW_s
     
     #Difference between the estimated and the real values
     do[j] <- estim_effect-effect
