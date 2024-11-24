@@ -25,8 +25,8 @@ QU <- vec_gen(k_U,1)              #Q(U)
 QW <- PWU%*%QU                    #Q(W)
 
 #Exact values
-PX1U <- runif(2)                              #P(X=1|U)
-PXU <- array(c(1-PX1U,PX1U),c(1,2,2))         #P(X|U)
+PX1U <- runif(k_U)                            #P(X=1|U)
+PXU <- array(c(1-PX1U,PX1U),c(1,k_U,2))       #P(X|U)
 PxU <- PXU[,,doX+1]                           #P(X=doX|U)
 PXE <- as.vector(PxU%*%PUE)                   #P(X=doX|E)
 PUEX <- t(t(PxU*PUE)/PXE)                     #P(U|E,X=doX)
@@ -35,7 +35,7 @@ PyUWX <- array(runif(2*k_U*k_W),c(k_W,k_U,2)) #P(Y=1|U,W,X)
 PyUWx <- PyUWX[,,doX+1]                       #P(Y=1|U,W,X=doX)
 PyUx <- diag(PyUWx%*%PWU)                     #P(Y=1|U,X=doX)
 PyEx_t <- PyUx%*%PUEX                         #P(Y=1|E,X=doX)
-effect <- PyEx_t%*%pseudosolve(PWEx_t)%*%QW         #Q(Y=1|do(X=doX))
+effect <- PyEx_t%*%pseudosolve(PWEx_t)%*%QW   #Q(Y=1|do(X=doX))
 
 for(l in 1:length(sample_sizes)){
   n <- sample_sizes[l]
@@ -56,7 +56,7 @@ for(l in 1:length(sample_sizes)){
     for(i in 1:k_E){
       U[,i] <- sample(1:k_U,n,replace=TRUE,prob=PUE[,i])
       W[,i] <- sapply(U[,i],substitution)
-      X[,i] <- (runif(n)<PXE[U[,i]])*1
+      X[,i] <- (runif(n)<PxU[U[,i]])*1
       Y[,i] <- (runif(n)<PyUWX[cbind(U[,i],W[,i],X[,i]+1)])*1
       
       #Estimation of P(Y=1|E,X=doX) and P(W|E,X=doX)
